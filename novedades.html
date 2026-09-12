@@ -339,9 +339,12 @@
         alert('Novedad publicada correctamente.');
       });
 
-      window.__LISTA_USER_ALLOWED__ = false;
-      fetchSession();
-      fetchNews();
+      window.LISTA_USER_ALLOWED = false;
+      (async () => {
+        // Esperar a verificar la sesión antes de cargar las noticias
+        await fetchSession();
+        await fetchNews();
+      })();
     </script>
   </body>
 </html>
