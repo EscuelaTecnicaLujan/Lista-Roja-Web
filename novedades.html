@@ -79,12 +79,12 @@
 
                 <label>
                   Categoría
-                  <select id="news-category" name="category">
-                    <option value="Escuela">Escuela</option>
+                  <select id="news-category" name="category" class="styled-select">
+                    <option value="Teoria">Teoria</option>
+                    <option value="Taller">Taller</option>
+                    <option value="Quimica">Quimica</option>
                     <option value="Limpieza">Limpieza</option>
-                    <option value="Seguridad">Seguridad</option>
-                    <option value="Comunidad">Comunidad</option>
-                    <option value="Proyectos">Proyectos</option>
+                    <option value="Noticias">Noticias</option>
                   </select>
                 </label>
 
@@ -117,6 +117,17 @@
           <div class="news-feed-card">
             <div class="feed-header">
               <h2>Últimas novedades</h2>
+              <div class="feed-controls">
+                <label for="category-filter" class="visually-hidden">Filtrar por categoría</label>
+                <select id="category-filter" class="styled-select">
+                  <option value="">Todas</option>
+                  <option value="Teoria">Teoria</option>
+                  <option value="Taller">Taller</option>
+                  <option value="Quimica">Quimica</option>
+                  <option value="Limpieza">Limpieza</option>
+                  <option value="Noticias">Noticias</option>
+                </select>
+              </div>
             </div>
             <div id="news-list" class="news-list" aria-live="polite"></div>
           </div>
@@ -240,18 +251,26 @@
       async function fetchNews() {
         const response = await fetch('/api/news');
         const items = await response.json();
+        window.__NEWS_ITEMS__ = items || [];
+        renderNews();
+      }
 
-        if (!items.length) {
+      function renderNews() {
+        const filter = document.getElementById('category-filter')?.value || '';
+        const items = window.__NEWS_ITEMS__ || [];
+        const filtered = filter ? items.filter((i) => (i.category || '').toString() === filter) : items;
+
+        if (!filtered.length) {
           newsList.innerHTML = '<div class="empty-state">Todavía no hay novedades publicadas.</div>';
           return;
         }
 
-        newsList.innerHTML = items
+        newsList.innerHTML = filtered
           .map(
             (item) => `
               <article class="news-item" data-id="${item.id}">
                 <div class="news-meta">
-                  <span class="news-tag">${escapeHtml(item.category || 'Escuela')}</span>
+                  <span class="news-tag">${escapeHtml(item.category || '')}</span>
                   <time>${escapeHtml(formatDate(item.date))}</time>
                 </div>
                 <div class="news-head">
@@ -265,6 +284,14 @@
             `
           )
           .join('');
+      }
+
+      // actualizar render cuando se cambia el filtro
+      const categoryFilterEl = document.getElementById('category-filter');
+      if (categoryFilterEl) {
+        categoryFilterEl.addEventListener('change', () => {
+          renderNews();
+        });
       }
 
       async function fetchSession() {
@@ -339,7 +366,7 @@
         alert('Novedad publicada correctamente.');
       });
 
-      window.LISTA_USER_ALLOWED = false;
+      window.__LISTA_USER_ALLOWED__ = false;
       (async () => {
         // Esperar a verificar la sesión antes de cargar las noticias
         await fetchSession();
