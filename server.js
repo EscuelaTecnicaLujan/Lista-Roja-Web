@@ -2,7 +2,8 @@ const express = require('express');
 const session = require('express-session');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const Database = require('better-sqlite3');
+const { Pool } = require('pg');
+const PgSession = require('connect-pg-simple')(session);
 const multer = require('multer');
 const dotenv = require('dotenv');
 const path = require('path');
@@ -15,9 +16,12 @@ const renderExternalUrl = (process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/,
 const renderHostname = process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : '';
 const appUrl = (process.env.APP_URL || renderExternalUrl || renderHostname || `http://localhost:${port}`).replace(/\/$/, '');
 const callbackUrl = (process.env.GOOGLE_CALLBACK_URL || `${appUrl}/auth/google/callback`).replace(/\/$/, '');
-const dbPath = path.join(__dirname, 'lista_roja.db');
 const uploadsDir = path.join(__dirname, 'uploads');
-const db = new Database(dbPath);
+const databaseUrl = process.env.DATABASE_URL;
+const pool = new Pool({
+  connectionString: databaseUrl,
+  ssl: databaseUrl && !/^localhost|127\.0\.0\.1/.test(databaseUrl) ? { rejectUnauthorized: false } : false
+});
 
 app.set('trust proxy', 1);
 
@@ -72,44 +76,48 @@ function isAllowedEmail(email) {
   return allowedEmails.includes(normalizeEmail(email));
 }
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS news (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+async function initializeDatabase() {
+  if (!databaseUrl) {
+    throw new Error('Falta DATABASE_URL. Configurala en .env o en las variables de entorno de Render.');
+  }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS news (
+    id BIGSERIAL PRIMARY KEY,
     title TEXT NOT NULL,
     category TEXT NOT NULL,
     summary TEXT NOT NULL,
     content TEXT NOT NULL,
     date TEXT NOT NULL,
     author_email TEXT NOT NULL,
-    images TEXT DEFAULT '[]',
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-`);
+    images JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
 
-try {
-  db.prepare('SELECT images FROM news LIMIT 1').get();
-} catch (error) {
-  db.exec('ALTER TABLE news ADD COLUMN images TEXT DEFAULT "[]"');
-}
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+    id BIGSERIAL PRIMARY KEY,
     google_id TEXT UNIQUE,
     email TEXT UNIQUE NOT NULL,
     name TEXT,
     picture TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-`);
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+}
 
 passport.serializeUser((user, done) => {
   done(null, user.email);
 });
 
-passport.deserializeUser((email, done) => {
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-  done(null, user || null);
+passport.deserializeUser(async (email, done) => {
+  try {
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    done(null, result.rows[0] || null);
+  } catch (error) {
+    done(error);
+  }
 });
 
 if (googleConfigured) {
@@ -121,7 +129,8 @@ if (googleConfigured) {
         callbackURL: callbackUrl,
         scope: ['profile', 'email']
       },
-      (accessToken, refreshToken, profile, done) => {
+      async (accessToken, refreshToken, profile, done) => {
+        try {
         const email = normalizeEmail(profile.emails && profile.emails[0] ? profile.emails[0].value : '');
 
         if (!email) {
@@ -132,16 +141,22 @@ if (googleConfigured) {
           return done(null, false, { message: 'Este usuario no está autorizado para publicar.' });
         }
 
-        let user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+        let result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+        let user = result.rows[0];
 
         if (!user) {
-          db.prepare(
-            'INSERT INTO users (google_id, email, name, picture) VALUES (?, ?, ?, ?)'
-          ).run(profile.id, email, profile.displayName || '', profile.photos && profile.photos[0] ? profile.photos[0].value : '');
-          user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+          await pool.query(
+            'INSERT INTO users (google_id, email, name, picture) VALUES ($1, $2, $3, $4)',
+            [profile.id, email, profile.displayName || '', profile.photos && profile.photos[0] ? profile.photos[0].value : '']
+          );
+          result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+          user = result.rows[0];
         }
 
         return done(null, user);
+        } catch (error) {
+          return done(error);
+        }
       }
     )
   );
@@ -151,6 +166,7 @@ app.use(express.json({ limit: '1mb' }));
 app.use(
   session({
     secret: process.env.SESSION_SECRET || 'lista-roja-secret',
+    store: new PgSession({ pool, createTableIfMissing: true }),
     resave: false,
     saveUninitialized: false,
     cookie: {
@@ -261,27 +277,35 @@ function parseImages(rawImages) {
     .slice(0, 10);
 }
 
-app.get('/api/news', (req, res) => {
-  const rows = db
-    .prepare('SELECT id, title, category, summary, content, date, author_email, images FROM news ORDER BY id DESC')
-    .all();
+function normalizeStoredImages(rawImages) {
+  if (Array.isArray(rawImages)) return rawImages;
 
-  const normalizedRows = rows.map((row) => ({
-    ...row,
-    images: (() => {
-      try {
-        const parsed = JSON.parse(row.images || '[]');
-        return Array.isArray(parsed) ? parsed : [];
-      } catch (error) {
-        return parseImages(row.images || '');
-      }
-    })()
-  }));
+  try {
+    const parsed = JSON.parse(rawImages || '[]');
+    return Array.isArray(parsed) ? parsed : parseImages(rawImages || '');
+  } catch (error) {
+    return parseImages(rawImages || '');
+  }
+}
 
-  res.json(normalizedRows);
+app.get('/api/news', async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, title, category, summary, content, date, author_email, images FROM news ORDER BY id DESC'
+    );
+
+    const normalizedRows = result.rows.map((row) => ({
+      ...row,
+      images: normalizeStoredImages(row.images)
+    }));
+
+    res.json(normalizedRows);
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.post('/api/news', ensureAuthorized, upload.array('images', 10), (req, res) => {
+app.post('/api/news', ensureAuthorized, upload.array('images', 10), async (req, res, next) => {
   const { title, category, summary, content, date } = req.body || {};
 
   if (!title || !category || !summary || !content) {
@@ -293,43 +317,63 @@ app.post('/api/news', ensureAuthorized, upload.array('images', 10), (req, res) =
   const uploadedImages = (req.files || []).map((file) => `/uploads/${file.filename}`);
   const parsedImages = JSON.stringify(uploadedImages);
 
-  const info = db
-    .prepare(
-      'INSERT INTO news (title, category, summary, content, date, author_email, images) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    )
-    .run(String(title).trim(), String(category).trim(), String(summary).trim(), String(content).trim(), publicationDate, authorEmail, parsedImages);
+  try {
+    const result = await pool.query(
+      `INSERT INTO news (title, category, summary, content, date, author_email, images)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+       RETURNING id, title, category, summary, content, date, author_email, images`,
+      [String(title).trim(), String(category).trim(), String(summary).trim(), String(content).trim(), publicationDate, authorEmail, parsedImages]
+    );
+    const created = result.rows[0];
 
-  const created = db
-    .prepare('SELECT id, title, category, summary, content, date, author_email, images FROM news WHERE id = ?')
-    .get(info.lastInsertRowid);
-
-  return res.status(201).json({ message: 'Novedad publicada.', news: { ...created, images: JSON.parse(created.images || '[]') } });
+    return res.status(201).json({
+      message: 'Novedad publicada.',
+      news: { ...created, images: normalizeStoredImages(created.images) }
+    });
+  } catch (error) {
+    return next(error);
+  }
 });
 
-app.delete('/api/news/:id', ensureAuthorized, (req, res) => {
+app.delete('/api/news/:id', ensureAuthorized, async (req, res, next) => {
   const newsId = Number(req.params.id);
 
   if (!Number.isInteger(newsId) || newsId <= 0) {
     return res.status(400).json({ message: 'ID inválido.' });
   }
 
-  const existing = db
-    .prepare('SELECT id, author_email FROM news WHERE id = ?')
-    .get(newsId);
+  try {
+    const result = await pool.query('SELECT id, author_email FROM news WHERE id = $1', [newsId]);
+    const existing = result.rows[0];
 
-  if (!existing) {
-    return res.status(404).json({ message: 'La novedad no existe.' });
+    if (!existing) {
+      return res.status(404).json({ message: 'La novedad no existe.' });
+    }
+
+    if (normalizeEmail(existing.author_email) !== normalizeEmail(req.user.email)) {
+      return res.status(403).json({ message: 'Solo el autor o un integrante de la lista puede eliminar esta novedad.' });
+    }
+
+    await pool.query('DELETE FROM news WHERE id = $1', [newsId]);
+    return res.json({ message: 'Novedad eliminada.' });
+  } catch (error) {
+    return next(error);
   }
-
-  if (normalizeEmail(existing.author_email) !== normalizeEmail(req.user.email)) {
-    return res.status(403).json({ message: 'Solo el autor o un integrante de la lista puede eliminar esta novedad.' });
-  }
-
-  db.prepare('DELETE FROM news WHERE id = ?').run(newsId);
-  return res.json({ message: 'Novedad eliminada.' });
 });
 
-app.listen(port, () => {
-  console.log(`Servidor corriendo en http://localhost:${port}`);
-  console.log(`Emails permitidos: ${allowedEmails.length ? allowedEmails.join(', ') : 'ninguno'}`);
+app.use((error, req, res, next) => {
+  console.error(error);
+  res.status(500).json({ message: 'Error interno del servidor.' });
 });
+
+initializeDatabase()
+  .then(() => {
+    app.listen(port, () => {
+      console.log(`Servidor corriendo en http://localhost:${port}`);
+      console.log(`Emails permitidos: ${allowedEmails.length ? allowedEmails.join(', ') : 'ninguno'}`);
+    });
+  })
+  .catch((error) => {
+    console.error(`No se pudo inicializar PostgreSQL: ${error.message}`);
+    process.exit(1);
+  });
