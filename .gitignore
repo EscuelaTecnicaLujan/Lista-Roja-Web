@@ -1,0 +1,13 @@
+node_modules/
+.env
+lista_roja.db
+uploads/*
+!uploads/.gitkeep
+
+# Logs
+npm-debug.log*
+*.log
+
+# Local editor and OS files
+.DS_Store
+Thumbs.db

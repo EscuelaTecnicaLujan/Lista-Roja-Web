@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Novedades | Lista Roja</title>
+    <meta
+      name="description"
+      content="Novedades de la campaña Lista Roja: publicaciones sobre mejoras, actividades y trabajo en la escuela."
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="icon" type="image/png" href="Assets/Logo.png" />
+  </head>
+  <body>
+    <header>
+      <div class="container nav">
+        <a href="index.html" class="brand" aria-label="Lista Roja inicio">
+          <img class="brand-mark" src="Assets/Logo.png" alt="Lista Roja" />
+          <span>Lista Roja</span>
+        </a>
+
+        <nav class="nav-links" aria-label="Navegación principal">
+          <a href="index.html#integrantes">Integrantes</a>
+          <a href="index.html#propuestas">Propuestas</a>
+          <a href="novedades.html">Novedades</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a
+            href="https://www.instagram.com/lista.roja_indu/"
+            class="social-link"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Instagram de Lista Roja"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="3.5" y="3.5" width="17" height="17" rx="5" fill="none" stroke="currentColor" stroke-width="1.7"/>
+              <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+              <circle cx="17.6" cy="6.4" r="1.2" fill="currentColor"/>
+            </svg>
+          </a>
+          <a
+            href="/auth/google"
+            class="social-link"
+            aria-label="Iniciar sesión con Google para publicar novedades"
+            title="Iniciar sesión con Google"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 12.5a3.2 3.2 0 1 1 0-6.4 3.2 3.2 0 0 1 0 6.4Zm-7.5 7.5c.9-2.5 3.1-4.2 6.3-4.2 1.7 0 3.2.5 4.5 1.4 1.2.9 2 2.1 2.4 3.5H4.5Zm14.5-2.2a6.1 6.1 0 0 0-1.2-3.5 6.2 6.2 0 0 0-4.7-2.1H8.4A6.3 6.3 0 0 0 4.2 17.2c1-1.6 2.7-2.8 4.8-3.3 1.4-.4 2.9-.3 4.2.2 1.3.6 2.4 1.6 3.2 2.8.8 1.2 1.2 2.5 1.2 3.8Z" fill="currentColor"/>
+            </svg>
+          </a>
+          <a href="index.html" class="btn btn-primary">Volver</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="news-page">
+      <section class="news-hero">
+        <div class="container">
+          <span class="eyebrow">Actualizaciones</span>
+          <h1>Novedades de la escuela</h1>
+          <p>
+            Acá publicamos lo que se hace, lo que se mejora y las acciones que la comunidad
+            educativa impulsa para cuidar el espacio escolar.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <div class="container news-layout">
+          <div class="news-form-card">
+            <div id="auth-status" class="auth-status"></div>
+            <div id="publish-panel">
+              <h2>Publicar una novedad</h2>
+              <form id="news-form" class="news-form" enctype="multipart/form-data">
+                <label>
+                  Título
+                  <input type="text" id="news-title" name="title" maxlength="80" required />
+                </label>
+
+                <label>
+                  Categoría
+                  <select id="news-category" name="category" class="styled-select">
+                    <option value="Teoria">Teoria</option>
+                    <option value="Taller">Taller</option>
+                    <option value="Quimica">Quimica</option>
+                    <option value="Limpieza">Limpieza</option>
+                    <option value="Noticias">Noticias</option>
+                  </select>
+                  <div class="custom-select" data-for="news-category" aria-hidden="true"></div>
+                </label>
+
+                <label>
+                  Resumen
+                  <textarea id="news-summary" name="summary" rows="3" maxlength="180" required></textarea>
+                </label>
+
+                <label>
+                  Detalle
+                  <textarea id="news-content" name="content" rows="5" required></textarea>
+                </label>
+
+                <label>
+                  Imágenes (opcional)
+                  <input id="news-images" name="images" type="file" accept="image/*" multiple />
+                </label>
+
+                <div class="form-row">
+                  <label>
+                    Fecha
+                    <input type="date" id="news-date" name="date" />
+                  </label>
+                  <button type="submit" class="btn btn-primary">Publicar novedad</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div class="news-feed-card">
+            <div class="feed-header">
+              <h2>Últimas novedades</h2>
+              <div class="feed-controls">
+                <label for="category-filter" class="visually-hidden">Filtrar por categoría</label>
+                <select id="category-filter" class="styled-select">
+                  <option value="">Todas</option>
+                  <option value="Teoria">Teoria</option>
+                  <option value="Taller">Taller</option>
+                  <option value="Quimica">Quimica</option>
+                  <option value="Limpieza">Limpieza</option>
+                  <option value="Noticias">Noticias</option>
+                </select>
+                <div class="custom-select" data-for="category-filter" aria-hidden="true"></div>
+              </div>
+            </div>
+            <div id="news-list" class="news-list" aria-live="polite"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="container footer-wrap">
+        <div class="brand">
+          <img class="brand-mark" src="Assets/Logo.png" alt="Lista Roja" />
+          <span>Lista Roja</span>
+        </div>
+        <span> 2026 — Por una escuela más segura y cuidada.</span>
+      </div>
+    </footer>
+
+    <script>
+      const form = document.getElementById('news-form');
+      const newsList = document.getElementById('news-list');
+      const authStatus = document.getElementById('auth-status');
+      const publishPanel = document.getElementById('publish-panel');
+
+      function formatDate(dateString) {
+        if (!dateString) return 'Sin fecha';
+        const date = new Date(dateString + 'T00:00:00');
+        return Number.isNaN(date.getTime()) ? dateString : date.toLocaleDateString('es-AR', {
+          day: '2-digit',
+          month: 'long',
+          year: 'numeric'
+        });
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function renderImages(images) {
+        const validImages = Array.isArray(images) ? images.filter(Boolean) : [];
+
+        if (!validImages.length) {
+          return '';
+        }
+
+        return `
+          <div class="news-gallery">
+            ${validImages
+              .slice(0, 4)
+              .map(
+                (src) => `
+                  <img src="${escapeHtml(src)}" alt="Imagen de la novedad" loading="lazy" data-src="${escapeHtml(src)}" />
+                `
+              )
+              .join('')}
+          </div>
+          <div class="lightbox-backdrop" aria-hidden="true"></div>
+        `;
+      }
+
+      function getDeleteButtonMarkup(itemId) {
+        if (!window.__LISTA_USER_ALLOWED__) {
+          return '';
+        }
+
+        return `<button class="delete-news-btn" data-id="${itemId}" type="button" aria-label="Eliminar novedad">Eliminar</button>`;
+      }
+
+      document.addEventListener('click', (event) => {
+        const image = event.target.closest('.news-gallery img');
+        if (image) {
+          const isExpanded = image.classList.contains('expanded');
+          document.querySelectorAll('.news-gallery img').forEach((img) => img.classList.remove('expanded'));
+          document.querySelectorAll('.lightbox-backdrop').forEach((backdrop) => {
+            backdrop.style.display = 'none';
+          });
+
+          if (!isExpanded) {
+            image.classList.add('expanded');
+            const backdrop = image.closest('.news-item')?.querySelector('.lightbox-backdrop');
+            if (backdrop) {
+              backdrop.style.display = 'block';
+            }
+          }
+          return;
+        }
+
+        const deleteButton = event.target.closest('.delete-news-btn');
+        if (deleteButton) {
+          const id = Number(deleteButton.dataset.id);
+          if (!Number.isInteger(id)) return;
+
+          const confirmed = window.confirm('¿Seguro que querés eliminar esta publicación?');
+          if (!confirmed) return;
+
+          fetch(`/api/news/${id}`, { method: 'DELETE' })
+            .then(async (response) => {
+              const result = await response.json().catch(() => ({}));
+              if (!response.ok) {
+                throw new Error(result.message || 'No se pudo eliminar la publicación.');
+              }
+              await fetchNews();
+            })
+            .catch((error) => {
+              alert(error.message || 'No se pudo eliminar la publicación.');
+            });
+          return;
+        }
+
+        const backdrop = event.target.closest('.lightbox-backdrop');
+        if (backdrop) {
+          document.querySelectorAll('.news-gallery img').forEach((img) => img.classList.remove('expanded'));
+          backdrop.style.display = 'none';
+        }
+      });
+
+      async function fetchNews() {
+        const response = await fetch('/api/news');
+        const items = await response.json();
+        window.__NEWS_ITEMS__ = items || [];
+        renderNews();
+      }
+
+      function renderNews() {
+        const filter = document.getElementById('category-filter')?.value || '';
+        const items = window.__NEWS_ITEMS__ || [];
+        const filtered = filter ? items.filter((i) => (i.category || '').toString() === filter) : items;
+
+        if (!filtered.length) {
+          newsList.innerHTML = '<div class="empty-state">Todavía no hay novedades publicadas.</div>';
+          return;
+        }
+
+        newsList.innerHTML = filtered
+          .map(
+            (item) => `
+              <article class="news-item" data-id="${item.id}">
+                <div class="news-meta">
+                  <span class="news-tag">${escapeHtml(item.category || '')}</span>
+                  <time>${escapeHtml(formatDate(item.date))}</time>
+                </div>
+                <div class="news-head">
+                  <h3>${escapeHtml(item.title)}</h3>
+                  ${getDeleteButtonMarkup(item.id)}
+                </div>
+                <p class="news-summary">${escapeHtml(item.summary)}</p>
+                <p class="news-content">${escapeHtml(item.content)}</p>
+                ${renderImages(item.images)}
+              </article>
+            `
+          )
+          .join('');
+      }
+
+      // actualizar render cuando se cambia el filtro
+      const categoryFilterEl = document.getElementById('category-filter');
+      if (categoryFilterEl) {
+        categoryFilterEl.addEventListener('change', () => {
+          renderNews();
+        });
+      }
+
+      async function fetchSession() {
+        try {
+          const response = await fetch('/api/me');
+          const user = await response.json();
+
+          if (!user.authenticated || !user.allowed) {
+            authStatus.innerHTML = `
+              <div class="auth-box">
+                <p>Solo los integrantes de la lista pueden publicar novedades.</p>
+              </div>
+            `;
+            publishPanel.style.display = 'none';
+            window.__LISTA_USER_ALLOWED__ = false;
+            return;
+          }
+
+          authStatus.innerHTML = `
+            <div class="auth-box logged-in">
+              <span>Sesión activa</span>
+              <strong>${escapeHtml(user.email)}</strong>
+              <a class="btn btn-secondary" href="/logout">Cerrar sesión</a>
+            </div>
+          `;
+          publishPanel.style.display = 'block';
+          window.__LISTA_USER_ALLOWED__ = true;
+        } catch (error) {
+          authStatus.innerHTML = '<div class="auth-box"><p>No se pudo verificar la sesión.</p></div>';
+          publishPanel.style.display = 'none';
+          window.__LISTA_USER_ALLOWED__ = false;
+        }
+      }
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        const title = document.getElementById('news-title').value.trim();
+        const category = document.getElementById('news-category').value;
+        const summary = document.getElementById('news-summary').value.trim();
+        const content = document.getElementById('news-content').value.trim();
+        const date = document.getElementById('news-date').value || new Date().toISOString().slice(0, 10);
+        const files = Array.from(document.getElementById('news-images').files || []);
+
+        if (!title || !summary || !content) {
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append('title', title);
+        formData.append('category', category);
+        formData.append('summary', summary);
+        formData.append('content', content);
+        formData.append('date', date);
+
+        files.forEach((file) => formData.append('images', file));
+
+        const response = await fetch('/api/news', {
+          method: 'POST',
+          body: formData
+        });
+
+        const responseData = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          alert(responseData.message || 'No se pudo publicar la novedad.');
+          return;
+        }
+
+        form.reset();
+        await fetchNews();
+        alert('Novedad publicada correctamente.');
+      });
+
+      window.__LISTA_USER_ALLOWED__ = false;
+      (async () => {
+        // Esperar a verificar la sesión antes de cargar las noticias
+        await fetchSession();
+        await fetchNews();
+
+        // Inicializar selects custom al terminar de cargar noticias y sesión
+        initCustomSelects();
+      })();
+
+      /* Custom select implementation: reemplaza la UI nativa por una lista estilizada
+         Lee opciones del <select> existente, mantiene el <select> oculto para que
+         el formulario pueda enviarlo y para que los listeners de 'change' sigan funcionando. */
+      function initCustomSelects() {
+        const placeholders = document.querySelectorAll('.custom-select');
+        placeholders.forEach((placeholder) => {
+          const targetId = placeholder.getAttribute('data-for');
+          const select = document.getElementById(targetId);
+          if (!select) return;
+
+          // Hide native select but keep it accessible
+          select.classList.add('custom-native-select');
+
+          // Build custom trigger and options container
+          const trigger = document.createElement('button');
+          trigger.type = 'button';
+          trigger.className = 'custom-select-trigger';
+          trigger.setAttribute('aria-haspopup', 'listbox');
+          trigger.setAttribute('aria-expanded', 'false');
+
+          const valueSpan = document.createElement('span');
+          valueSpan.className = 'custom-select-value';
+          valueSpan.textContent = select.options[select.selectedIndex]?.text || select.options[0]?.text || '';
+
+          const arrow = document.createElement('span');
+          arrow.className = 'arrow';
+
+          trigger.appendChild(valueSpan);
+          trigger.appendChild(arrow);
+
+          const optionsRoot = document.createElement('ul');
+          optionsRoot.className = 'custom-select-options';
+          optionsRoot.setAttribute('role', 'listbox');
+
+          Array.from(select.options).forEach((opt, idx) => {
+            const li = document.createElement('li');
+            li.className = 'custom-select-option';
+            li.setAttribute('role', 'option');
+            li.setAttribute('data-value', opt.value);
+            li.setAttribute('tabindex', '-1');
+            li.setAttribute('aria-selected', opt.selected ? 'true' : 'false');
+            li.textContent = opt.text;
+            optionsRoot.appendChild(li);
+          });
+
+          // Clear placeholder and attach new elements
+          placeholder.innerHTML = '';
+          placeholder.appendChild(trigger);
+          placeholder.appendChild(optionsRoot);
+
+          // Event handlers
+          function open() {
+            placeholder.classList.add('open');
+            trigger.setAttribute('aria-expanded', 'true');
+            // focus first selected or first option
+            const selected = optionsRoot.querySelector('[aria-selected="true"]') || optionsRoot.querySelector('.custom-select-option');
+            if (selected) selected.focus();
+            document.addEventListener('click', outsideClick);
+          }
+          function close() {
+            placeholder.classList.remove('open');
+            trigger.setAttribute('aria-expanded', 'false');
+            trigger.focus();
+            document.removeEventListener('click', outsideClick);
+          }
+          function outsideClick(e) {
+            if (!placeholder.contains(e.target)) close();
+          }
+
+          trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (placeholder.classList.contains('open')) close(); else open();
+          });
+
+          // keyboard on trigger
+          trigger.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              open();
+            }
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              if (placeholder.classList.contains('open')) close(); else open();
+            }
+          });
+
+          optionsRoot.addEventListener('keydown', (e) => {
+            const focused = document.activeElement;
+            if (!focused || !focused.classList.contains('custom-select-option')) return;
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              const next = focused.nextElementSibling || optionsRoot.firstElementChild;
+              if (next) next.focus();
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              const prev = focused.previousElementSibling || optionsRoot.lastElementChild;
+              if (prev) prev.focus();
+            } else if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              focused.click();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              close();
+            }
+          });
+
+          optionsRoot.addEventListener('click', (e) => {
+            const option = e.target.closest('.custom-select-option');
+            if (!option) return;
+            const value = option.getAttribute('data-value');
+            const text = option.textContent;
+            // update native select
+            select.value = value;
+            // mark aria-selected
+            optionsRoot.querySelectorAll('.custom-select-option').forEach((o) => o.setAttribute('aria-selected', 'false'));
+            option.setAttribute('aria-selected', 'true');
+            valueSpan.textContent = text;
+            // dispatch change so other listeners react (filter, form submission)
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            close();
+          });
+
+          // ensure focus behaviour for options
+          optionsRoot.querySelectorAll('.custom-select-option').forEach((opt) => {
+            opt.addEventListener('focus', () => opt.classList.add('focused'));
+            opt.addEventListener('blur', () => opt.classList.remove('focused'));
+            // allow keyboard selection when focused
+            opt.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                opt.click();
+              }
+            });
+          });
+        });
+      }
+    </script>
+  </body>
+</html>
