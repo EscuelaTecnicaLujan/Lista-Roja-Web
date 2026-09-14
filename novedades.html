@@ -100,9 +100,16 @@
                   <textarea id="news-content" name="content" rows="5" required></textarea>
                 </label>
 
+                <fieldset class="reaction-editor">
+                  <legend>Reacciones de esta novedad</legend>
+                  <div id="reaction-options-editor" class="reaction-options-editor"></div>
+                  <button id="add-reaction-option" type="button" class="btn btn-secondary">Agregar reacción</button>
+                </fieldset>
+
                 <label>
                   Imágenes (opcional)
                   <input id="news-images" name="images" type="file" accept="image/*" multiple />
+                  <div id="news-image-preview" class="image-preview" aria-live="polite"></div>
                 </label>
 
                 <div class="form-row">
@@ -153,6 +160,56 @@
       const newsList = document.getElementById('news-list');
       const authStatus = document.getElementById('auth-status');
       const publishPanel = document.getElementById('publish-panel');
+      const reactionOptionsEditor = document.getElementById('reaction-options-editor');
+      const imageInput = document.getElementById('news-images');
+      const imagePreview = document.getElementById('news-image-preview');
+      const defaultReactionOptions = [
+        { label: 'Me gusta' },
+        { label: 'Corazón' },
+        { label: 'Aplausos' }
+      ];
+      let previewUrls = [];
+
+      function renderReactionEditor(options = defaultReactionOptions) {
+        reactionOptionsEditor.innerHTML = options
+          .map((option, index) => `
+            <div class="reaction-option-row">
+              <input
+                type="text"
+                maxlength="32"
+                value="${escapeHtml(option.label || '')}"
+                data-reaction-index="${index}"
+                aria-label="Nombre de la reacción ${index + 1}"
+                placeholder="Nombre de la reacción"
+              />
+              <button class="remove-reaction-option" type="button" data-reaction-index="${index}" aria-label="Quitar reacción">Quitar</button>
+            </div>
+          `)
+          .join('');
+      }
+
+      function renderImagePreview(files) {
+        previewUrls.forEach((url) => URL.revokeObjectURL(url));
+        previewUrls = [];
+
+        if (!files.length) {
+          imagePreview.innerHTML = '';
+          return;
+        }
+
+        imagePreview.innerHTML = files
+          .map((file) => {
+            const url = URL.createObjectURL(file);
+            previewUrls.push(url);
+            return `
+              <figure class="image-preview-item">
+                <img src="${url}" alt="Vista previa de ${escapeHtml(file.name)}" />
+                <figcaption>${escapeHtml(file.name)}</figcaption>
+              </figure>
+            `;
+          })
+          .join('');
+      }
 
       function formatDate(dateString) {
         if (!dateString) return 'Sin fecha';
@@ -206,27 +263,23 @@
       function getReactionMarkup(item) {
         const reactions = item.reactions || {};
         const userReaction = item.userReaction || '';
-        const reactionLabels = {
-          like: 'Me gusta',
-          heart: 'Corazón',
-          celebrate: 'Aplausos'
-        };
+        const reactionOptions = Array.isArray(item.reactionOptions) ? item.reactionOptions : [];
 
         return `
           <div class="news-reactions" aria-label="Reacciones">
-            ${Object.entries(reactionLabels)
-              .map(([type, label]) => `
+            ${reactionOptions
+              .map((option) => `
                 <button
-                  class="reaction-btn${userReaction === type ? ' active' : ''}"
+                  class="reaction-btn${userReaction === option.key ? ' active' : ''}"
                   type="button"
-                  data-reaction="${type}"
+                  data-reaction="${escapeHtml(option.key)}"
                   data-id="${item.id}"
                   ${window.__LISTA_USER_ALLOWED__ ? '' : 'disabled'}
-                  aria-label="${label}"
-                  title="${window.__LISTA_USER_ALLOWED__ ? label : 'Iniciá sesión para reaccionar'}"
+                  aria-label="${escapeHtml(option.label)}"
+                  title="${window.__LISTA_USER_ALLOWED__ ? escapeHtml(option.label) : 'Iniciá sesión para reaccionar'}"
                 >
-                  <span>${label}</span>
-                  <strong>${Number(reactions[type] || 0)}</strong>
+                  <span>${escapeHtml(option.label)}</span>
+                  <strong>${Number(reactions[option.key] || 0)}</strong>
                 </button>
               `)
               .join('')}
@@ -355,6 +408,26 @@
         });
       }
 
+      document.getElementById('add-reaction-option').addEventListener('click', () => {
+        const options = Array.from(reactionOptionsEditor.querySelectorAll('input')).map((input) => ({ label: input.value }));
+        options.push({ label: '' });
+        renderReactionEditor(options);
+        reactionOptionsEditor.lastElementChild?.querySelector('input')?.focus();
+      });
+
+      reactionOptionsEditor.addEventListener('click', (event) => {
+        const removeButton = event.target.closest('.remove-reaction-option');
+        if (!removeButton) return;
+
+        const options = Array.from(reactionOptionsEditor.querySelectorAll('input')).map((input) => ({ label: input.value }));
+        options.splice(Number(removeButton.dataset.reactionIndex), 1);
+        renderReactionEditor(options);
+      });
+
+      imageInput.addEventListener('change', () => {
+        renderImagePreview(Array.from(imageInput.files || []));
+      });
+
       async function fetchSession() {
         try {
           const response = await fetch('/api/me');
@@ -395,7 +468,11 @@
         const summary = document.getElementById('news-summary').value.trim();
         const content = document.getElementById('news-content').value.trim();
         const date = document.getElementById('news-date').value || new Date().toISOString().slice(0, 10);
-        const files = Array.from(document.getElementById('news-images').files || []);
+        const files = Array.from(imageInput.files || []);
+        const reactions = Array.from(reactionOptionsEditor.querySelectorAll('input'))
+          .map((input) => input.value.trim())
+          .filter(Boolean)
+          .map((label) => ({ label }));
 
         if (!title || !summary || !content) {
           return;
@@ -407,6 +484,7 @@
         formData.append('summary', summary);
         formData.append('content', content);
         formData.append('date', date);
+        formData.append('reactions', JSON.stringify(reactions));
 
         files.forEach((file) => formData.append('images', file));
 
@@ -423,11 +501,14 @@
         }
 
         form.reset();
+        renderReactionEditor();
+        renderImagePreview([]);
         await fetchNews();
         alert('Novedad publicada correctamente.');
       });
 
       window.__LISTA_USER_ALLOWED__ = false;
+      renderReactionEditor();
       (async () => {
         // Esperar a verificar la sesión antes de cargar las noticias
         await fetchSession();

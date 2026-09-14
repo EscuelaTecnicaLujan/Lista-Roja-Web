@@ -18,6 +18,11 @@ const appUrl = (process.env.APP_URL || renderExternalUrl || renderHostname || `h
 const callbackUrl = (process.env.GOOGLE_CALLBACK_URL || `${appUrl}/auth/google/callback`).replace(/\/$/, '');
 const uploadsDir = path.join(__dirname, 'uploads');
 const databaseUrl = process.env.DATABASE_URL;
+const defaultReactionOptions = [
+  { key: 'like', label: 'Me gusta' },
+  { key: 'heart', label: 'Corazón' },
+  { key: 'celebrate', label: 'Aplausos' }
+];
 const pool = new Pool({
   connectionString: databaseUrl,
   ssl: databaseUrl && !/^localhost|127\.0\.0\.1/.test(databaseUrl) ? { rejectUnauthorized: false } : false
@@ -59,7 +64,6 @@ const allowedEmails = (process.env.ALLOWED_GOOGLE_EMAILS || '')
   .filter(Boolean);
 
 const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
-const reactionTypes = ['like', 'heart', 'celebrate'];
 
 if (!googleConfigured) {
   console.warn('Faltan GOOGLE_CLIENT_ID o GOOGLE_CLIENT_SECRET. La autenticación con Google no funcionará hasta configurarlos.');
@@ -92,8 +96,14 @@ async function initializeDatabase() {
     date TEXT NOT NULL,
     author_email TEXT NOT NULL,
     images JSONB NOT NULL DEFAULT '[]'::jsonb,
+    reaction_options JSONB NOT NULL DEFAULT '[{"key":"like","label":"Me gusta"},{"key":"heart","label":"Corazón"},{"key":"celebrate","label":"Aplausos"}]'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+  `);
+
+  await pool.query(`
+    ALTER TABLE news
+    ADD COLUMN IF NOT EXISTS reaction_options JSONB NOT NULL DEFAULT '[{"key":"like","label":"Me gusta"},{"key":"heart","label":"Corazón"},{"key":"celebrate","label":"Aplausos"}]'::jsonb;
   `);
 
   await pool.query(`
@@ -111,11 +121,13 @@ async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS news_reactions (
       news_id BIGINT NOT NULL REFERENCES news(id) ON DELETE CASCADE,
       user_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
-      reaction TEXT NOT NULL CHECK (reaction IN ('like', 'heart', 'celebrate')),
+      reaction TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (news_id, user_email)
     );
   `);
+
+  await pool.query('ALTER TABLE news_reactions DROP CONSTRAINT IF EXISTS news_reactions_reaction_check');
 }
 
 passport.serializeUser((user, done) => {
@@ -299,7 +311,49 @@ function normalizeStoredImages(rawImages) {
   }
 }
 
-async function getReactionSummary(newsId, userEmail) {
+function normalizeReactionOptions(rawOptions, useDefaults = true) {
+  let options = rawOptions;
+
+  if (typeof rawOptions === 'string') {
+    try {
+      options = JSON.parse(rawOptions);
+    } catch (error) {
+      options = [];
+    }
+  }
+
+  if (!Array.isArray(options)) {
+    options = useDefaults ? defaultReactionOptions : [];
+  }
+
+  const usedKeys = new Set();
+  return options
+    .map((option, index) => {
+      const label = typeof option === 'string' ? option.trim() : String(option?.label || '').trim();
+      if (!label) return null;
+
+      const requestedKey = typeof option === 'object' ? String(option.key || '') : '';
+      const baseKey = (requestedKey || label)
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 24) || `reaction-${index + 1}`;
+      let key = baseKey;
+      let suffix = 2;
+      while (usedKeys.has(key)) {
+        key = `${baseKey}-${suffix}`;
+        suffix += 1;
+      }
+      usedKeys.add(key);
+      return { key, label: label.slice(0, 32) };
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+async function getReactionSummary(newsId, userEmail, reactionOptions) {
   const result = await pool.query(
     `SELECT reaction, COUNT(*)::int AS count
      FROM news_reactions
@@ -307,9 +361,11 @@ async function getReactionSummary(newsId, userEmail) {
      GROUP BY reaction`,
     [newsId]
   );
-  const reactions = { like: 0, heart: 0, celebrate: 0 };
+  const reactions = Object.fromEntries(reactionOptions.map((option) => [option.key, 0]));
   result.rows.forEach((row) => {
-    reactions[row.reaction] = row.count;
+    if (Object.prototype.hasOwnProperty.call(reactions, row.reaction)) {
+      reactions[row.reaction] = row.count;
+    }
   });
 
   let userReaction = null;
@@ -327,14 +383,15 @@ async function getReactionSummary(newsId, userEmail) {
 app.get('/api/news', async (req, res, next) => {
   try {
     const result = await pool.query(
-      'SELECT id, title, category, summary, content, date, author_email, images FROM news ORDER BY id DESC'
+      'SELECT id, title, category, summary, content, date, author_email, images, reaction_options FROM news ORDER BY id DESC'
     );
 
     const userEmail = req.isAuthenticated() ? normalizeEmail(req.user.email) : null;
     const normalizedRows = await Promise.all(result.rows.map(async (row) => ({
       ...row,
       images: normalizeStoredImages(row.images),
-      ...(await getReactionSummary(row.id, userEmail))
+      reactionOptions: normalizeReactionOptions(row.reaction_options),
+      ...(await getReactionSummary(row.id, userEmail, normalizeReactionOptions(row.reaction_options)))
     })));
 
     res.json(normalizedRows);
@@ -351,14 +408,14 @@ app.post('/api/news/:id/reactions', ensureAuthorized, async (req, res, next) => 
     return res.status(400).json({ message: 'ID inválido.' });
   }
 
-  if (!reactionTypes.includes(reaction)) {
-    return res.status(400).json({ message: 'Reacción inválida.' });
-  }
-
   try {
-    const newsResult = await pool.query('SELECT id FROM news WHERE id = $1', [newsId]);
+    const newsResult = await pool.query('SELECT id, reaction_options FROM news WHERE id = $1', [newsId]);
     if (!newsResult.rows[0]) {
       return res.status(404).json({ message: 'La novedad no existe.' });
+    }
+    const reactionOptions = normalizeReactionOptions(newsResult.rows[0].reaction_options);
+    if (!reactionOptions.some((option) => option.key === reaction)) {
+      return res.status(400).json({ message: 'Reacción inválida.' });
     }
 
     const userEmail = normalizeEmail(req.user.email);
@@ -383,7 +440,7 @@ app.post('/api/news/:id/reactions', ensureAuthorized, async (req, res, next) => 
 
     return res.json({
       newsId,
-      ...(await getReactionSummary(newsId, userEmail))
+      ...(await getReactionSummary(newsId, userEmail, reactionOptions))
     });
   } catch (error) {
     return next(error);
@@ -401,19 +458,24 @@ app.post('/api/news', ensureAuthorized, upload.array('images', 10), async (req, 
   const authorEmail = normalizeEmail(req.user.email);
   const uploadedImages = (req.files || []).map((file) => `/uploads/${file.filename}`);
   const parsedImages = JSON.stringify(uploadedImages);
+  const reactionOptions = normalizeReactionOptions(req.body.reactions);
 
   try {
     const result = await pool.query(
-      `INSERT INTO news (title, category, summary, content, date, author_email, images)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-       RETURNING id, title, category, summary, content, date, author_email, images`,
-      [String(title).trim(), String(category).trim(), String(summary).trim(), String(content).trim(), publicationDate, authorEmail, parsedImages]
+      `INSERT INTO news (title, category, summary, content, date, author_email, images, reaction_options)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
+       RETURNING id, title, category, summary, content, date, author_email, images, reaction_options`,
+      [String(title).trim(), String(category).trim(), String(summary).trim(), String(content).trim(), publicationDate, authorEmail, parsedImages, JSON.stringify(reactionOptions)]
     );
     const created = result.rows[0];
 
     return res.status(201).json({
       message: 'Novedad publicada.',
-      news: { ...created, images: normalizeStoredImages(created.images) }
+      news: {
+        ...created,
+        images: normalizeStoredImages(created.images),
+        reactionOptions: normalizeReactionOptions(created.reaction_options)
+      }
     });
   } catch (error) {
     return next(error);
