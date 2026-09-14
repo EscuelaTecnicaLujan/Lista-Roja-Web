@@ -17,7 +17,7 @@ const renderExternalUrl = (process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/,
 const renderHostname = process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : '';
 const appUrl = (process.env.APP_URL || renderExternalUrl || renderHostname || `http://localhost:${port}`).replace(/\/$/, '');
 const callbackUrl = (process.env.GOOGLE_CALLBACK_URL || `${appUrl}/auth/google/callback`).replace(/\/$/, '');
-const uploadsDir = path.join(__dirname, 'uploads');
+const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
 const databaseUrl = process.env.DATABASE_URL;
 const defaultReactionOptions = [
   { key: 'like', label: 'Me gusta' },
