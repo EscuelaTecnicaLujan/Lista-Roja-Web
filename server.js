@@ -7,6 +7,7 @@ const PgSession = require('connect-pg-simple')(session);
 const multer = require('multer');
 const dotenv = require('dotenv');
 const path = require('path');
+const crypto = require('crypto');
 
 dotenv.config();
 
@@ -120,7 +121,8 @@ async function initializeDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS news_reactions (
       news_id BIGINT NOT NULL REFERENCES news(id) ON DELETE CASCADE,
-      user_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      user_email TEXT REFERENCES users(email) ON DELETE CASCADE,
+      voter_id TEXT,
       reaction TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (news_id, user_email)
@@ -128,6 +130,11 @@ async function initializeDatabase() {
   `);
 
   await pool.query('ALTER TABLE news_reactions DROP CONSTRAINT IF EXISTS news_reactions_reaction_check');
+  await pool.query('ALTER TABLE news_reactions ADD COLUMN IF NOT EXISTS voter_id TEXT');
+  await pool.query('ALTER TABLE news_reactions DROP CONSTRAINT IF EXISTS news_reactions_pkey');
+  await pool.query('ALTER TABLE news_reactions ALTER COLUMN user_email DROP NOT NULL');
+  await pool.query('UPDATE news_reactions SET voter_id = user_email WHERE voter_id IS NULL');
+  await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS news_reactions_news_voter_idx ON news_reactions (news_id, voter_id)');
 }
 
 passport.serializeUser((user, done) => {
@@ -353,7 +360,7 @@ function normalizeReactionOptions(rawOptions, useDefaults = true) {
     .slice(0, 8);
 }
 
-async function getReactionSummary(newsId, userEmail, reactionOptions) {
+async function getReactionSummary(newsId, voterId, reactionOptions) {
   const result = await pool.query(
     `SELECT reaction, COUNT(*)::int AS count
      FROM news_reactions
@@ -369,10 +376,10 @@ async function getReactionSummary(newsId, userEmail, reactionOptions) {
   });
 
   let userReaction = null;
-  if (userEmail) {
+  if (voterId) {
     const userResult = await pool.query(
-      'SELECT reaction FROM news_reactions WHERE news_id = $1 AND user_email = $2',
-      [newsId, userEmail]
+      'SELECT reaction FROM news_reactions WHERE news_id = $1 AND voter_id = $2',
+      [newsId, voterId]
     );
     userReaction = userResult.rows[0]?.reaction || null;
   }
@@ -380,18 +387,44 @@ async function getReactionSummary(newsId, userEmail, reactionOptions) {
   return { reactions, userReaction };
 }
 
+function getVoterId(req) {
+  if (req.isAuthenticated()) {
+    return `user:${normalizeEmail(req.user.email)}`;
+  }
+
+  if (!req.session.voterId) {
+    req.session.voterId = `anonymous:${crypto.randomUUID()}`;
+  }
+
+  return req.session.voterId;
+}
+
+const liveClients = new Set();
+
+function broadcastNewsUpdate() {
+  liveClients.forEach((client) => {
+    client.write('event: news-updated\ndata: {}\n\n');
+  });
+}
+
+setInterval(() => {
+  liveClients.forEach((client) => {
+    client.write(': keep-alive\n\n');
+  });
+}, 25000);
+
 app.get('/api/news', async (req, res, next) => {
   try {
     const result = await pool.query(
       'SELECT id, title, category, summary, content, date, author_email, images, reaction_options FROM news ORDER BY id DESC'
     );
 
-    const userEmail = req.isAuthenticated() ? normalizeEmail(req.user.email) : null;
+    const voterId = getVoterId(req);
     const normalizedRows = await Promise.all(result.rows.map(async (row) => ({
       ...row,
       images: normalizeStoredImages(row.images),
       reactionOptions: normalizeReactionOptions(row.reaction_options),
-      ...(await getReactionSummary(row.id, userEmail, normalizeReactionOptions(row.reaction_options)))
+      ...(await getReactionSummary(row.id, voterId, normalizeReactionOptions(row.reaction_options)))
     })));
 
     res.json(normalizedRows);
@@ -400,7 +433,20 @@ app.get('/api/news', async (req, res, next) => {
   }
 });
 
-app.post('/api/news/:id/reactions', ensureAuthorized, async (req, res, next) => {
+app.get('/api/news/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  res.write('event: connected\ndata: {}\n\n');
+  liveClients.add(res);
+
+  req.on('close', () => {
+    liveClients.delete(res);
+  });
+});
+
+app.post('/api/news/:id/reactions', async (req, res, next) => {
   const newsId = Number(req.params.id);
   const reaction = String(req.body?.reaction || '').trim();
 
@@ -418,29 +464,30 @@ app.post('/api/news/:id/reactions', ensureAuthorized, async (req, res, next) => 
       return res.status(400).json({ message: 'Reacción inválida.' });
     }
 
-    const userEmail = normalizeEmail(req.user.email);
+    const voterId = getVoterId(req);
     const existingResult = await pool.query(
-      'SELECT reaction FROM news_reactions WHERE news_id = $1 AND user_email = $2',
-      [newsId, userEmail]
+      'SELECT reaction FROM news_reactions WHERE news_id = $1 AND voter_id = $2',
+      [newsId, voterId]
     );
 
     if (existingResult.rows[0]?.reaction === reaction) {
       await pool.query(
-        'DELETE FROM news_reactions WHERE news_id = $1 AND user_email = $2',
-        [newsId, userEmail]
+        'DELETE FROM news_reactions WHERE news_id = $1 AND voter_id = $2',
+        [newsId, voterId]
       );
     } else {
       await pool.query(
-        `INSERT INTO news_reactions (news_id, user_email, reaction)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (news_id, user_email) DO UPDATE SET reaction = EXCLUDED.reaction`,
-        [newsId, userEmail, reaction]
+        `INSERT INTO news_reactions (news_id, user_email, voter_id, reaction)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (news_id, voter_id) DO UPDATE SET reaction = EXCLUDED.reaction`,
+        [newsId, req.isAuthenticated() ? normalizeEmail(req.user.email) : null, voterId, reaction]
       );
     }
+    broadcastNewsUpdate();
 
     return res.json({
       newsId,
-      ...(await getReactionSummary(newsId, userEmail, reactionOptions))
+      ...(await getReactionSummary(newsId, voterId, reactionOptions))
     });
   } catch (error) {
     return next(error);
@@ -468,6 +515,7 @@ app.post('/api/news', ensureAuthorized, upload.array('images', 10), async (req, 
       [String(title).trim(), String(category).trim(), String(summary).trim(), String(content).trim(), publicationDate, authorEmail, parsedImages, JSON.stringify(reactionOptions)]
     );
     const created = result.rows[0];
+    broadcastNewsUpdate();
 
     return res.status(201).json({
       message: 'Novedad publicada.',
@@ -502,6 +550,7 @@ app.delete('/api/news/:id', ensureAuthorized, async (req, res, next) => {
     }
 
     await pool.query('DELETE FROM news WHERE id = $1', [newsId]);
+    broadcastNewsUpdate();
     return res.json({ message: 'Novedad eliminada.' });
   } catch (error) {
     return next(error);

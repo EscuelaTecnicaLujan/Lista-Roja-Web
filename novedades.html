@@ -274,9 +274,8 @@
                   type="button"
                   data-reaction="${escapeHtml(option.key)}"
                   data-id="${item.id}"
-                  ${window.__LISTA_USER_ALLOWED__ ? '' : 'disabled'}
                   aria-label="${escapeHtml(option.label)}"
-                  title="${window.__LISTA_USER_ALLOWED__ ? escapeHtml(option.label) : 'Iniciá sesión para reaccionar'}"
+                  title="${escapeHtml(option.label)}"
                 >
                   <span>${escapeHtml(option.label)}</span>
                   <strong>${Number(reactions[option.key] || 0)}</strong>
@@ -362,7 +361,7 @@
       });
 
       async function fetchNews() {
-        const response = await fetch('/api/news');
+        const response = await fetch('/api/news', { cache: 'no-store' });
         const items = await response.json();
         window.__NEWS_ITEMS__ = items || [];
         renderNews();
@@ -509,6 +508,10 @@
 
       window.__LISTA_USER_ALLOWED__ = false;
       renderReactionEditor();
+      const newsStream = new EventSource('/api/news/stream');
+      newsStream.addEventListener('news-updated', () => {
+        fetchNews().catch(() => {});
+      });
       (async () => {
         // Esperar a verificar la sesión antes de cargar las noticias
         await fetchSession();
