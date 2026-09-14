@@ -203,6 +203,37 @@
         return `<button class="delete-news-btn" data-id="${itemId}" type="button" aria-label="Eliminar novedad">Eliminar</button>`;
       }
 
+      function getReactionMarkup(item) {
+        const reactions = item.reactions || {};
+        const userReaction = item.userReaction || '';
+        const reactionLabels = {
+          like: 'Me gusta',
+          heart: 'Corazón',
+          celebrate: 'Aplausos'
+        };
+
+        return `
+          <div class="news-reactions" aria-label="Reacciones">
+            ${Object.entries(reactionLabels)
+              .map(([type, label]) => `
+                <button
+                  class="reaction-btn${userReaction === type ? ' active' : ''}"
+                  type="button"
+                  data-reaction="${type}"
+                  data-id="${item.id}"
+                  ${window.__LISTA_USER_ALLOWED__ ? '' : 'disabled'}
+                  aria-label="${label}"
+                  title="${window.__LISTA_USER_ALLOWED__ ? label : 'Iniciá sesión para reaccionar'}"
+                >
+                  <span>${label}</span>
+                  <strong>${Number(reactions[type] || 0)}</strong>
+                </button>
+              `)
+              .join('')}
+          </div>
+        `;
+      }
+
       document.addEventListener('click', (event) => {
         const image = event.target.closest('.news-gallery img');
         if (image) {
@@ -240,6 +271,32 @@
             })
             .catch((error) => {
               alert(error.message || 'No se pudo eliminar la publicación.');
+            });
+          return;
+        }
+
+        const reactionButton = event.target.closest('.reaction-btn');
+        if (reactionButton && !reactionButton.disabled) {
+          const id = Number(reactionButton.dataset.id);
+          const reaction = reactionButton.dataset.reaction;
+          if (!Number.isInteger(id) || !reaction) return;
+
+          reactionButton.disabled = true;
+          fetch(`/api/news/${id}/reactions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reaction })
+          })
+            .then(async (response) => {
+              const result = await response.json().catch(() => ({}));
+              if (!response.ok) {
+                throw new Error(result.message || 'No se pudo guardar la reacción.');
+              }
+              await fetchNews();
+            })
+            .catch((error) => {
+              alert(error.message || 'No se pudo guardar la reacción.');
+              reactionButton.disabled = false;
             });
           return;
         }
@@ -283,6 +340,7 @@
                 <p class="news-summary">${escapeHtml(item.summary)}</p>
                 <p class="news-content">${escapeHtml(item.content)}</p>
                 ${renderImages(item.images)}
+                ${getReactionMarkup(item)}
               </article>
             `
           )

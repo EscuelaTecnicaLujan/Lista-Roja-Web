@@ -59,6 +59,7 @@ const allowedEmails = (process.env.ALLOWED_GOOGLE_EMAILS || '')
   .filter(Boolean);
 
 const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+const reactionTypes = ['like', 'heart', 'celebrate'];
 
 if (!googleConfigured) {
   console.warn('Faltan GOOGLE_CLIENT_ID o GOOGLE_CLIENT_SECRET. La autenticación con Google no funcionará hasta configurarlos.');
@@ -103,6 +104,16 @@ async function initializeDatabase() {
     name TEXT,
     picture TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS news_reactions (
+      news_id BIGINT NOT NULL REFERENCES news(id) ON DELETE CASCADE,
+      user_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      reaction TEXT NOT NULL CHECK (reaction IN ('like', 'heart', 'celebrate')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (news_id, user_email)
     );
   `);
 }
@@ -288,20 +299,94 @@ function normalizeStoredImages(rawImages) {
   }
 }
 
+async function getReactionSummary(newsId, userEmail) {
+  const result = await pool.query(
+    `SELECT reaction, COUNT(*)::int AS count
+     FROM news_reactions
+     WHERE news_id = $1
+     GROUP BY reaction`,
+    [newsId]
+  );
+  const reactions = { like: 0, heart: 0, celebrate: 0 };
+  result.rows.forEach((row) => {
+    reactions[row.reaction] = row.count;
+  });
+
+  let userReaction = null;
+  if (userEmail) {
+    const userResult = await pool.query(
+      'SELECT reaction FROM news_reactions WHERE news_id = $1 AND user_email = $2',
+      [newsId, userEmail]
+    );
+    userReaction = userResult.rows[0]?.reaction || null;
+  }
+
+  return { reactions, userReaction };
+}
+
 app.get('/api/news', async (req, res, next) => {
   try {
     const result = await pool.query(
       'SELECT id, title, category, summary, content, date, author_email, images FROM news ORDER BY id DESC'
     );
 
-    const normalizedRows = result.rows.map((row) => ({
+    const userEmail = req.isAuthenticated() ? normalizeEmail(req.user.email) : null;
+    const normalizedRows = await Promise.all(result.rows.map(async (row) => ({
       ...row,
-      images: normalizeStoredImages(row.images)
-    }));
+      images: normalizeStoredImages(row.images),
+      ...(await getReactionSummary(row.id, userEmail))
+    })));
 
     res.json(normalizedRows);
   } catch (error) {
     next(error);
+  }
+});
+
+app.post('/api/news/:id/reactions', ensureAuthorized, async (req, res, next) => {
+  const newsId = Number(req.params.id);
+  const reaction = String(req.body?.reaction || '').trim();
+
+  if (!Number.isInteger(newsId) || newsId <= 0) {
+    return res.status(400).json({ message: 'ID inválido.' });
+  }
+
+  if (!reactionTypes.includes(reaction)) {
+    return res.status(400).json({ message: 'Reacción inválida.' });
+  }
+
+  try {
+    const newsResult = await pool.query('SELECT id FROM news WHERE id = $1', [newsId]);
+    if (!newsResult.rows[0]) {
+      return res.status(404).json({ message: 'La novedad no existe.' });
+    }
+
+    const userEmail = normalizeEmail(req.user.email);
+    const existingResult = await pool.query(
+      'SELECT reaction FROM news_reactions WHERE news_id = $1 AND user_email = $2',
+      [newsId, userEmail]
+    );
+
+    if (existingResult.rows[0]?.reaction === reaction) {
+      await pool.query(
+        'DELETE FROM news_reactions WHERE news_id = $1 AND user_email = $2',
+        [newsId, userEmail]
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO news_reactions (news_id, user_email, reaction)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (news_id, user_email) DO UPDATE SET reaction = EXCLUDED.reaction`,
+        [newsId, userEmail, reaction]
+      );
+    }
+
+    return res.json({
+      newsId,
+      ...(await getReactionSummary(newsId, userEmail))
+    });
+  } catch (error) {
+    return next(error);
   }
 });
 
