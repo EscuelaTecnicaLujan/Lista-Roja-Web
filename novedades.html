@@ -109,6 +109,11 @@
                 <label>
                   Imágenes (opcional)
                   <input id="news-images" name="images" type="file" accept="image/*" multiple />
+                </label>
+
+                <label>
+                  URLs de imágenes (una por línea)
+                  <textarea id="news-image-urls" name="imageUrls" rows="3" placeholder="Pegá una URL por línea: https://ejemplo.com/imagen.jpg"></textarea>
                   <div id="news-image-preview" class="image-preview" aria-live="polite"></div>
                 </label>
 
@@ -162,6 +167,7 @@
       const publishPanel = document.getElementById('publish-panel');
       const reactionOptionsEditor = document.getElementById('reaction-options-editor');
       const imageInput = document.getElementById('news-images');
+      const imageUrlInput = document.getElementById('news-image-urls');
       const imagePreview = document.getElementById('news-image-preview');
       const defaultReactionOptions = [
         { label: 'Me gusta' },
@@ -188,16 +194,24 @@
           .join('');
       }
 
-      function renderImagePreview(files) {
+      function getImageUrlsFromInput() {
+        return imageUrlInput.value
+          .split(/\r?\n|,/)
+          .map((value) => value.trim())
+          .filter((value, index, values) => value && values.indexOf(value) === index)
+          .slice(0, 10);
+      }
+
+      function renderImagePreview(files, imageUrls = getImageUrlsFromInput()) {
         previewUrls.forEach((url) => URL.revokeObjectURL(url));
         previewUrls = [];
 
-        if (!files.length) {
+        if (!files.length && !imageUrls.length) {
           imagePreview.innerHTML = '';
           return;
         }
 
-        imagePreview.innerHTML = files
+        const filePreviews = files
           .map((file) => {
             const url = URL.createObjectURL(file);
             previewUrls.push(url);
@@ -209,6 +223,16 @@
             `;
           })
           .join('');
+        const urlPreviews = imageUrls
+          .map((url) => `
+            <figure class="image-preview-item">
+              <img src="${escapeHtml(url)}" alt="Vista previa de imagen externa" />
+              <figcaption>Imagen por URL</figcaption>
+            </figure>
+          `)
+          .join('');
+
+        imagePreview.innerHTML = filePreviews + urlPreviews;
       }
 
       function formatDate(dateString) {
@@ -427,6 +451,10 @@
         renderImagePreview(Array.from(imageInput.files || []));
       });
 
+      imageUrlInput.addEventListener('input', () => {
+        renderImagePreview(Array.from(imageInput.files || []));
+      });
+
       async function fetchSession() {
         try {
           const response = await fetch('/api/me');
@@ -468,6 +496,7 @@
         const content = document.getElementById('news-content').value.trim();
         const date = document.getElementById('news-date').value || new Date().toISOString().slice(0, 10);
         const files = Array.from(imageInput.files || []);
+        const imageUrls = getImageUrlsFromInput();
         const reactions = Array.from(reactionOptionsEditor.querySelectorAll('input'))
           .map((input) => input.value.trim())
           .filter(Boolean)
@@ -483,6 +512,7 @@
         formData.append('summary', summary);
         formData.append('content', content);
         formData.append('date', date);
+        formData.append('imageUrls', imageUrls.join('\n'));
         formData.append('reactions', JSON.stringify(reactions));
 
         files.forEach((file) => formData.append('images', file));

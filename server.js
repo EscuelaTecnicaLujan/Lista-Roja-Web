@@ -307,6 +307,31 @@ function parseImages(rawImages) {
     .slice(0, 10);
 }
 
+function parseImageUrls(rawUrls) {
+  const values = Array.isArray(rawUrls)
+    ? rawUrls
+    : String(rawUrls || '').split(/\r?\n|,/);
+
+  const urls = values
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+
+  const invalidUrl = urls.find((value) => {
+    try {
+      const parsed = new URL(value);
+      return !['http:', 'https:'].includes(parsed.protocol);
+    } catch (error) {
+      return true;
+    }
+  });
+
+  if (invalidUrl) {
+    throw new Error(`La URL de imagen no es válida: ${invalidUrl}`);
+  }
+
+  return [...new Set(urls)].slice(0, 10);
+}
+
 function normalizeStoredImages(rawImages) {
   if (Array.isArray(rawImages)) return rawImages;
 
@@ -504,7 +529,13 @@ app.post('/api/news', ensureAuthorized, upload.array('images', 10), async (req, 
   const publicationDate = date || new Date().toISOString().slice(0, 10);
   const authorEmail = normalizeEmail(req.user.email);
   const uploadedImages = (req.files || []).map((file) => `/uploads/${file.filename}`);
-  const parsedImages = JSON.stringify(uploadedImages);
+  let imageUrls;
+  try {
+    imageUrls = parseImageUrls(req.body.imageUrls);
+  } catch (error) {
+    return res.status(400).json({ message: error.message });
+  }
+  const parsedImages = JSON.stringify([...new Set([...uploadedImages, ...imageUrls])].slice(0, 10));
   const reactionOptions = normalizeReactionOptions(req.body.reactions);
 
   try {
