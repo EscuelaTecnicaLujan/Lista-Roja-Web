@@ -24,6 +24,8 @@ const defaultReactionOptions = [
   { key: 'heart', label: 'Corazón' },
   { key: 'celebrate', label: 'Aplausos' }
 ];
+const voterCookieName = 'lista_roja_voter_id';
+const voterCookieMaxAge = 10 * 365 * 24 * 60 * 60;
 const pool = new Pool({
   connectionString: databaseUrl,
   ssl: databaseUrl && !/^localhost|127\.0\.0\.1/.test(databaseUrl) ? { rejectUnauthorized: false } : false
@@ -412,16 +414,39 @@ async function getReactionSummary(newsId, voterId, reactionOptions) {
   return { reactions, userReaction };
 }
 
-function getVoterId(req) {
+function getCookie(req, name) {
+  const cookies = String(req.headers.cookie || '').split(';');
+  const cookie = cookies.find((item) => item.trim().startsWith(`${name}=`));
+  return cookie ? decodeURIComponent(cookie.trim().slice(name.length + 1)) : '';
+}
+
+function setVoterCookie(req, res, voterId) {
+  if (getCookie(req, voterCookieName)) return;
+
+  const secure = process.env.APP_URL && /^https:/i.test(process.env.APP_URL) || process.env.RENDER_EXTERNAL_URL || process.env.RENDER_EXTERNAL_HOSTNAME;
+  const attributes = [
+    `${voterCookieName}=${encodeURIComponent(voterId)}`,
+    `Max-Age=${voterCookieMaxAge}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax'
+  ];
+  if (secure) attributes.push('Secure');
+  res.append('Set-Cookie', attributes.join('; '));
+}
+
+function getVoterId(req, res) {
   if (req.isAuthenticated()) {
     return `user:${normalizeEmail(req.user.email)}`;
   }
 
-  if (!req.session.voterId) {
-    req.session.voterId = `anonymous:${crypto.randomUUID()}`;
+  let voterId = getCookie(req, voterCookieName);
+  if (!voterId) {
+    voterId = req.session.voterId || `anonymous:${crypto.randomUUID()}`;
+    setVoterCookie(req, res, voterId);
   }
 
-  return req.session.voterId;
+  return voterId;
 }
 
 const liveClients = new Set();
@@ -444,7 +469,7 @@ app.get('/api/news', async (req, res, next) => {
       'SELECT id, title, category, summary, content, date, author_email, images, reaction_options FROM news ORDER BY id DESC'
     );
 
-    const voterId = getVoterId(req);
+    const voterId = getVoterId(req, res);
     const normalizedRows = await Promise.all(result.rows.map(async (row) => ({
       ...row,
       images: normalizeStoredImages(row.images),
@@ -489,7 +514,7 @@ app.post('/api/news/:id/reactions', async (req, res, next) => {
       return res.status(400).json({ message: 'Reacción inválida.' });
     }
 
-    const voterId = getVoterId(req);
+    const voterId = getVoterId(req, res);
     const existingResult = await pool.query(
       'SELECT reaction FROM news_reactions WHERE news_id = $1 AND voter_id = $2',
       [newsId, voterId]
